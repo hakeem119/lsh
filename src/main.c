@@ -23,6 +23,15 @@
 int lsh_cd(char **args);
 int lsh_help(char **args);
 int lsh_exit(char **args);
+int lsh_pwd(char **args);
+int lsh_echo(char **args);
+int lsh_history(char **args);
+int lsh_env(char **args);
+
+		
+#define LSH_HISTORY_MAX 100
+static char *lsh_history_list[LSH_HISTORY_MAX];
+static int   lsh_history_count = 0;
 
 /*
   List of builtin commands, followed by their corresponding functions.
@@ -30,13 +39,21 @@ int lsh_exit(char **args);
 char *builtin_str[] = {
   "cd",
   "help",
-  "exit"
+  "exit",
+  "pwd",
+  "echo",
+  "history",
+  "env"
 };
 
 int (*builtin_func[]) (char **) = {
   &lsh_cd,
   &lsh_help,
-  &lsh_exit
+  &lsh_exit,
+  &lsh_pwd,
+  &lsh_echo,
+  &lsh_history,
+  &lsh_env
 };
 
 int lsh_num_builtins() {
@@ -91,7 +108,92 @@ int lsh_help(char **args)
  */
 int lsh_exit(char **args)
 {
+  /* Free history before exiting */
+  int i;
+  for (i = 0; i < lsh_history_count; i++) {
+    free(lsh_history_list[i]);
+  }
   return 0;
+}
+
+/**
+   @brief Builtin command: print working directory.
+   @param args List of args.  Not examined.
+   @return Always returns 1, to continue executing.
+ */
+int lsh_pwd(char **args)
+{
+  char *cwd = getcwd(NULL, 0);  /* Let getcwd allocate the buffer */
+  if (cwd == NULL) {
+    perror("lsh: pwd");
+  } else {
+    printf("%s\n", cwd);
+    free(cwd);
+  }
+  return 1;
+}
+
+/**
+   @brief Builtin command: echo arguments to stdout.
+   @param args List of args.  args[0] is "echo"; remaining args are printed.
+   @return Always returns 1, to continue executing.
+ */
+int lsh_echo(char **args)
+{
+  int i;
+  for (i = 1; args[i] != NULL; i++) {
+    if (i > 1) printf(" ");
+    printf("%s", args[i]);
+  }
+  printf("\n");
+  return 1;
+}
+
+/**
+   @brief Record a command in the history list.
+   @param line The raw input line to store (a copy is made).
+ */
+void lsh_history_add(const char *line)
+{
+  if (lsh_history_count < LSH_HISTORY_MAX) {
+    lsh_history_list[lsh_history_count++] = strdup(line);
+  } else {
+    /* Ring-buffer: drop oldest entry and shift */
+    free(lsh_history_list[0]);
+    memmove(&lsh_history_list[0], &lsh_history_list[1],
+            (LSH_HISTORY_MAX - 1) * sizeof(char *));
+    lsh_history_list[LSH_HISTORY_MAX - 1] = strdup(line);
+  }
+}
+
+/**
+   @brief Builtin command: print command history.
+   @param args List of args.  Not examined.
+   @return Always returns 1, to continue executing.
+ */
+int lsh_history(char **args)
+{
+  int i;
+  for (i = 0; i < lsh_history_count; i++) {
+    printf("  %d  %s\n", i + 1, lsh_history_list[i]);
+  }
+  return 1;
+}
+
+/**
+   @brief Builtin command: print all environment variables.
+   @param args List of args.  Not examined.
+   @return Always returns 1, to continue executing.
+ */
+int lsh_env(char **args)
+{
+  extern char **environ;
+  char **env = environ;
+  while (*env) {
+    printf("%s\n", *env);
+    env++;
+  }
+  return 1;
 }
 
 /**
@@ -232,7 +334,7 @@ char **lsh_split_line(char *line)
       tokens_backup = tokens;
       tokens = realloc(tokens, bufsize * sizeof(char*));
       if (!tokens) {
-		free(tokens_backup);
+        free(tokens_backup);
         fprintf(stderr, "lsh: allocation error\n");
         exit(EXIT_FAILURE);
       }
@@ -256,6 +358,12 @@ void lsh_loop(void)
   do {
     printf("> ");
     line = lsh_read_line();
+
+    /* Record non-empty lines in history */
+    if (line[0] != '\0') {
+      lsh_history_add(line);
+    }
+
     args = lsh_split_line(line);
     status = lsh_execute(args);
 
@@ -281,4 +389,3 @@ int main(int argc, char **argv)
 
   return EXIT_SUCCESS;
 }
-
